@@ -1,10 +1,25 @@
 import net from 'net';
 import HTTPUtils from './httpUtils';
-export default class Server {
-    port: number;
+import FileManager from './files';
 
-    constructor(port: number) {
+export interface Response {
+    version: string;
+    contentType: string;
+    contentLength: number;
+    contentDisposition: string;
+    connection: string;
+    content: string;
+}
+
+export default class Server {
+    private port: number;
+    private resourcesPath: string;
+    private fileManager: FileManager;
+
+    constructor(port: number, resourcesPath: string) {
         this.port = port;
+        this.resourcesPath = resourcesPath;
+        this.fileManager = new FileManager(resourcesPath);
     }
     public start(): void {
         const server: net.Server = net.createServer((socket) => {
@@ -22,8 +37,6 @@ export default class Server {
         socket.on('data', (data) => {
             console.log("New client connected");
             const httpUtils = new HTTPUtils(data.toString('utf-8'));
-            console.log("Header: ", httpUtils.header);
-            console.log("Content: ", httpUtils.content)
             const body = '<h1>Hello, world!</h1>';
             const contentLength = Buffer.byteLength(body);
             const response = `HTTP/1.1 200 OK\r\n` +
@@ -42,5 +55,36 @@ export default class Server {
         socket.on('error', (err) => {
             console.error(`Error on socket: ${err.message}`);
         });
+    }
+    private manageFiles(method: string, path: string): string {
+        const notFoundContent: string = "<h1>404 FILE NOT FOUND</h1>";
+        const notFound: Response = {
+            version: "1.1",
+            contentType: "text/html",
+            contentLength: notFoundContent.length,
+            contentDisposition: "",
+            connection: "close",
+            content: notFoundContent,
+        };;
+        switch (method) {
+            case 'GET':
+                if (path == "/") {
+                    const res: Response = {
+                        version: "1.1",
+                        contentType: "text/html",
+                        contentLength: 0,
+                        contentDisposition: "",
+                        connection: "close",
+                        content: "",
+                    };
+                    return this.generateHeader(res, 200);
+                }
+                break;
+        }
+        return this.generateHeader(notFound, 404);
+    }
+
+    public generateHeader(response: Response, code: number): string {
+        return ""
     }
 }

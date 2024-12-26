@@ -1,9 +1,12 @@
+import { Response } from "./server";
+
 export default class HTTPUtils {
-    data: string;
-    content: string;
-    contentLength: number;
-    header: string;
-    headers: { [key: string]: any };
+    private data: string;
+    private header: string;
+
+    public content: string;
+    public contentLength: number;
+    public headers: { [key: string]: any };
 
     constructor(data: string) {
         this.data = data;
@@ -12,6 +15,7 @@ export default class HTTPUtils {
         this.content = this.getContent(this.data);
         this.headers = this.getHeaders(this.header);
     }
+
     private getContent(data: string): string {
         if (this.contentLength > 0) {
             const match = data.match(/\r\n\r\n([\s\S]*)/);
@@ -30,11 +34,19 @@ export default class HTTPUtils {
         throw new Error("Error parsing header");
     }
     private getHeaders(header: string): { [key: string]: any } {
-        const parameters: { [key: string]: string } = {
-            header: "John"
-
+        const headerLines = header.split("\r\n");
+        const parameters: { [key: string]: string } = {};
+        const extras = headerLines[0].split(" ");
+        parameters["Method"] = extras[0];
+        parameters["Path"] = extras[1];
+        parameters["Version"] = extras[2];
+        for (const line of headerLines) {
+            if (line.includes(": ")) {
+                const [key, val] = line.split(": ");
+                parameters[key.trim()] = val.trim();
+            }
         }
-        return parameters
+        return parameters;
     }
     private getContentLength(data: string): number {
         const lengthExist = data.match(/Content-Length:\s*(\d+)/i);
@@ -43,6 +55,5 @@ export default class HTTPUtils {
         }
         return 0
     }
-
 }
 
