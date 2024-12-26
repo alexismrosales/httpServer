@@ -2,7 +2,7 @@ import { Response } from "./server";
 
 export default class HTTPUtils {
     private data: string;
-    private header: string;
+    public header: string;
 
     public content: string;
     public contentLength: number;
