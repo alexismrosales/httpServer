@@ -30,10 +30,7 @@ export default class FileManager {
             console.error(`File: ${fileName}`);
             return null;
         }
-
         const filePath = path.join(this.resourcesPath, fileName);
-        // TODO: searchFile from path resourcesPath+/+/nameFile 
-        // and return array of data
         try {
             const data = await fs.readFile(filePath);
             return data

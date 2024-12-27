@@ -1,5 +1,3 @@
-import { Response } from "./server";
-
 export default class HTTPUtils {
     private data: string;
     public header: string;
@@ -26,19 +24,23 @@ export default class HTTPUtils {
         }
         return "";
     }
+
     private getHeader(data: string): string {
+        console.log("New header:", data);
         const match = data.match(/^([\s\S]*?)\r\n\r\n/);
         if (match) {
             return match[1]
         }
         throw new Error("Error parsing header");
     }
+
     private getHeaders(header: string): { [key: string]: any } {
         const headerLines = header.split("\r\n");
         const parameters: { [key: string]: string } = {};
         const extras = headerLines[0].split(" ");
         parameters["Method"] = extras[0];
-        parameters["Path"] = extras[1];
+        parameters["Path"] = extras[1] == '/' ? extras[1] : extras[1].slice(1);
+        parameters["Extension"] = extras[1].split(".")[1];
         parameters["Version"] = extras[2];
         for (const line of headerLines) {
             if (line.includes(": ")) {
