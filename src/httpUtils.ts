@@ -2,7 +2,7 @@ export default class HTTPUtils {
     private data: string;
     public header: string;
 
-    public content: string;
+    public content: string = "";
     public contentLength: number;
     public headers: { [key: string]: any };
 
@@ -10,11 +10,11 @@ export default class HTTPUtils {
         this.data = data;
         this.contentLength = this.getContentLength(this.data);
         this.header = this.getHeader(this.data);
-        this.content = this.getContent(this.data);
+        this.content = this.content;
         this.headers = this.getHeaders(this.header);
     }
 
-    private getContent(data: string): string {
+    public getContent(data: string): string {
         if (this.contentLength > 0) {
             const match = data.match(/\r\n\r\n([\s\S]*)/);
             if (match) {
@@ -26,7 +26,6 @@ export default class HTTPUtils {
     }
 
     private getHeader(data: string): string {
-        console.log("New header:", data);
         const match = data.match(/^([\s\S]*?)\r\n\r\n/);
         if (match) {
             return match[1]

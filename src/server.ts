@@ -1,7 +1,6 @@
 import net from 'net';
 import HTTPUtils from './httpUtils';
 import FileManager from './files';
-import { buffer } from 'stream/consumers';
 
 export interface Response {
     code: number;
@@ -38,19 +37,63 @@ export default class Server {
     }
 
     private handleClient(socket: net.Socket): void {
+        let contentLength: number = 0;
+        let headerLength: number = 0;
+        let buffer = "";
         socket.on('data', async (data) => {
-            // TODO: Manage buffer in case is greater than length
-            console.log("New client connected");
-            console.log("")
-            this.httpUtils = new HTTPUtils(data.toString('utf-8'));
-            const response: Buffer = await this.managePetition();
-            ;
-            socket.write(response);
-            socket.end(); // TODO: Remove end of socket depending if keep alive or not
-        })
+            buffer += data.toString('utf-8');
+            if (contentLength == 0) {
+                console.log("New client connected");
+                this.httpUtils = new HTTPUtils(data.toString('utf-8'));
+                contentLength = this.httpUtils.contentLength;
+                headerLength = this.httpUtils.header.length;
+            }
+            if (((buffer.length - headerLength) >= contentLength) && contentLength != 0) {
+                if (this.httpUtils) {
+                    this.httpUtils.content = this.httpUtils.getContent(buffer)
+                    const response: Buffer = await this.managePetition();
+                    socket.write(response);
+                    if (this.httpUtils.headers["Connection"] != "keep-alive") {
+                        socket.end()
+                    }
+                }
+            }
+            if (contentLength == 0) {
+                const response: Buffer = await this.managePetition();
+                socket.write(response);
+                if (this.httpUtils) {
+                    if (this.httpUtils.headers["Connection"] != "keep-alive") {
+                        socket.end()
+                    } else {
+                        console.log("Connection in mode keep-alive");
+                        resetTimeout();
+                    }
+                }
+            }
+        });
+        let inactivityTimeout: NodeJS.Timeout | null = null;
+        const resetTimeout = () => {
+            if (inactivityTimeout) {
+                clearTimeout(inactivityTimeout);
+            }
+            inactivityTimeout = setTimeout(() => {
+                console.log("Close socket for inactivty");
+                socket.end();
+            }, 3000);
+        };
+
+        socket.on('close', () => {
+            if (inactivityTimeout) {
+                clearTimeout(inactivityTimeout);
+                inactivityTimeout = null;
+            }
+            console.log("Connection close");
+        });
+
         socket.on('end', () => {
             console.log('Client disconnected!');
-        })
+        });
+
         socket.on('error', (err) => {
             console.error(`Error on socket: ${err.message}`);
         });
@@ -62,15 +105,18 @@ export default class Server {
         switch (method) {
             case 'GET':
                 try {
-                    const res = await this.handleGet(path);
-                    return res;
+                    return await this.handleGet(path);
                 } catch (err) {
                     console.error("Error handling request: ", err);
                     return this.createResponse(500, "text/html", "<h1>500 INTERNAL SERVER ERROR</h1>");
                 }
             case 'PUT':
                 try {
-                    //TODO: Create function to handle PUT method
+                    if (this.httpUtils) {
+                        return await this.handlePut(this.httpUtils.content);
+                    } else {
+                        console.error("Error with handler");
+                    }
                 }
                 catch (err) {
                     console.error("Error handling request: ", err)
@@ -102,9 +148,10 @@ export default class Server {
                     const ext = this.httpUtils?.headers["Extension"];
                     if (file) {
                         if (ext == "css" || ext == "html" || ext == "txt") {
+                            console.log(ext)
                             return this.createResponse(200, `text/${ext}`, file);
                         } else {
-                            return this.createResponse(200, `application/{ext}`, file);
+                            return this.createResponse(200, `application/${ext == "js" ? "javascript" : ext}`, file);
                         }
                     } else {
                         console.error("Error file does not exists!");
@@ -118,6 +165,18 @@ export default class Server {
         return this.createResponse(404, "text/html", "<h1>404 FILE NOT FOUND</h1>");
     }
 
+    private async handlePut(data: string) {
+        const content = "<h1>201 FILE CREATED</h1>";
+        try {
+            const jsonFile = JSON.parse(data);
+            const fileBuffer = Buffer.from(jsonFile["content"]);
+            await this.fileManager.writeFile(jsonFile["filename"], fileBuffer);
+            return this.createResponse(201, "text/html", content);
+        } catch (err) {
+            throw new Error("Error writing file!");
+        }
+    }
+
     private createResponse(code: number, contentType: string, content: Buffer | string): Buffer {
         const res: Response = {
             code: code,
@@ -125,7 +184,7 @@ export default class Server {
             contentType: contentType,
             contentLength: content.length,
             contentDisposition: "",
-            connection: "close",
+            connection: this.httpUtils?.headers["Connection"],
             content: content,
         };
 
@@ -151,10 +210,11 @@ export default class Server {
                 ? `Content-Disposition: attachment; filename="${this.httpUtils?.headers["Path"]}"\r\n\r\n`
                 : `\r\n`)
         );
+        console.log("To sent: ")
+        console.log(headers);
         return Buffer.concat([
             Buffer.from(headers, "utf-8"),
             Buffer.isBuffer(response.content) ? response.content : Buffer.from(response.content, "utf-8")
         ]);
-
     }
 }

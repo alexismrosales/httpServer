@@ -1,6 +1,7 @@
 import { getAllFilesSync } from 'get-all-files';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { throws } from 'assert';
 // listFiles() returns Files[string]
 // getFile(nameFile) returns File
 // createFile(nameFile, content: bytes) returns Boolean
@@ -26,8 +27,8 @@ export default class FileManager {
     }
 
     public async getFile(fileName: string): Promise<Buffer | null> {
-        if (!this.files.includes(fileName)) {
-            console.error(`File: ${fileName}`);
+        if (!this.files.includes(fileName.substring(fileName.lastIndexOf('/') + 1))) {
+            console.error(`Error with file: ${fileName}`);
             return null;
         }
         const filePath = path.join(this.resourcesPath, fileName);
@@ -38,6 +39,18 @@ export default class FileManager {
         catch (err) {
             console.error("Error reading file from: ", filePath, err);
             throw new Error(`Could not read file: ${err}`);
+        }
+    }
+
+    public async writeFile(fileName: string, data: string | Buffer): Promise<void> {
+        const filePath = path.join(this.resourcesPath, fileName);
+        try {
+            await fs.writeFile(filePath, data);
+            console.log("written in: ", filePath)
+        }
+        catch (err) {
+            console.error("Error writing file: ", err);
+            throw new Error(`Could not write file: ${err}`);
         }
     }
 
