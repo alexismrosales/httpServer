@@ -36,7 +36,10 @@ export default class HTTPUtils {
     private getHeaders(header: string): { [key: string]: any } {
         const headerLines = header.split("\r\n");
         const parameters: { [key: string]: string } = {};
-        const extras = headerLines[0].split(" ");
+        const extras = headerLines[0].trim().split(/\s+/);
+        if (extras.length < 3) {
+            throw new Error("Malformed request line in header");
+        }
         parameters["Method"] = extras[0];
         parameters["Path"] = extras[1] == '/' ? extras[1] : extras[1].slice(1);
         parameters["Extension"] = extras[1].split(".")[1];

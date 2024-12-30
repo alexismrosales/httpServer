@@ -42,32 +42,44 @@ export default class Server {
         let buffer = "";
         socket.on('data', async (data) => {
             buffer += data.toString('utf-8');
-            if (contentLength == 0) {
+            if (contentLength === 0) {
                 console.log("New client connected");
-                this.httpUtils = new HTTPUtils(data.toString('utf-8'));
+                this.httpUtils = new HTTPUtils(buffer);
                 contentLength = this.httpUtils.contentLength;
                 headerLength = this.httpUtils.header.length;
             }
-            if (((buffer.length - headerLength) >= contentLength) && contentLength != 0) {
-                if (this.httpUtils) {
-                    this.httpUtils.content = this.httpUtils.getContent(buffer)
-                    const response: Buffer = await this.managePetition();
-                    socket.write(response);
-                    if (this.httpUtils.headers["Connection"] != "keep-alive") {
-                        socket.end()
+
+            if (((buffer.length - headerLength) >= contentLength) && contentLength !== 0) {
+                try {
+                    if (this.httpUtils) {
+                        this.httpUtils.content = this.httpUtils.getContent(buffer);
+                        const response: Buffer = await this.managePetition();
+                        socket.write(response);
+
+                        buffer = "";
+                        contentLength = 0;
+                        headerLength = 0;
+
+                        // if (this.httpUtils.headers["Connection"] !== "keep-alive") {
+                        socket.end();
+                        // }
                     }
+                } catch (err) {
+                    console.error("Error handling request:", err);
+                    socket.write(this.createResponse(500, "text/html", "<h1>500 INTERNAL SERVER ERROR</h1>"));
+                    socket.end();
                 }
             }
             if (contentLength == 0) {
                 const response: Buffer = await this.managePetition();
                 socket.write(response);
                 if (this.httpUtils) {
-                    if (this.httpUtils.headers["Connection"] != "keep-alive") {
-                        socket.end()
-                    } else {
-                        console.log("Connection in mode keep-alive");
-                        resetTimeout();
-                    }
+                    //  if (this.httpUtils.headers["Connection"] != "keep-alive") {
+                    socket.end()
+                    //  } else {
+                    //      console.log("Connection in mode keep-alive");
+                    //      resetTimeout();
+                    //  }
                 }
             }
         });
@@ -102,12 +114,13 @@ export default class Server {
     private async managePetition(): Promise<Buffer> {
         const method = this.httpUtils?.headers["Method"];
         const path = this.httpUtils?.headers["Path"];
+        console.log(`Request:\n${this.httpUtils?.header}`);
         switch (method) {
             case 'GET':
                 try {
                     return await this.handleGet(path);
                 } catch (err) {
-                    console.error("Error handling request: ", err);
+                    console.error("Error handling request:", err);
                     return this.createResponse(500, "text/html", "<h1>500 INTERNAL SERVER ERROR</h1>");
                 }
             case 'PUT':
@@ -121,6 +134,7 @@ export default class Server {
                 catch (err) {
                     console.error("Error handling request: ", err)
                 }
+            case 'DELETE':
             default:
                 return this.createResponse(405, "text/html", "<h1>405 METHOD NOT ALLOWED</h1>");
         }
@@ -140,6 +154,17 @@ export default class Server {
 
                 } catch (err) {
                     console.error("Error obtaining file!");
+                }
+                break;
+            case 'list':
+                try {
+                    const list = this.fileManager.listFiles()
+                    const listResponse = {
+                        list: list,
+                    };
+                    return this.createResponse(200, "application/json", JSON.stringify(listResponse))
+                } catch (error) {
+                    console.error("Error obtaining list files:", error)
                 }
                 break;
             default:
@@ -170,19 +195,23 @@ export default class Server {
         try {
             const jsonFile = JSON.parse(data);
             const fileBuffer = Buffer.from(jsonFile["content"]);
+            if (!jsonFile["filename"] || !jsonFile["content"]) {
+                throw new Error("Invalid payload format");
+            }
             await this.fileManager.writeFile(jsonFile["filename"], fileBuffer);
             return this.createResponse(201, "text/html", content);
         } catch (err) {
-            throw new Error("Error writing file!");
+            throw new Error(`Error writing file: ${err}`);
         }
     }
 
     private createResponse(code: number, contentType: string, content: Buffer | string): Buffer {
+        const contentBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8");
         const res: Response = {
             code: code,
             version: "1.1",
             contentType: contentType,
-            contentLength: content.length,
+            contentLength: contentBuffer.byteLength,
             contentDisposition: "",
             connection: this.httpUtils?.headers["Connection"],
             content: content,
@@ -201,17 +230,20 @@ export default class Server {
             415: 'Unsupported Media Type',
             500: 'Internal Server Error'
         }
-        const headers = (
+        let headers = (
             `HTTP/${response.version} ${response.code} ${codes[response.code]}\r\n` +
             `Content-Type: ${response.contentType}\r\n` +
             `Content-Length: ${response.contentLength}\r\n` +
-            `Connection: ${response.connection}\r\n` +
-            (Buffer.isBuffer(response.content)
-                ? `Content-Disposition: attachment; filename="${this.httpUtils?.headers["Path"]}"\r\n\r\n`
-                : `\r\n`)
+            `Connection: ${response.connection}\r\n`
         );
+        if (Buffer.isBuffer(response.content) && response.contentDisposition) {
+            headers += `Content-Disposition: attachment; filename="${this.httpUtils?.headers["Path"]}"\r\n`;
+        } else {
+            headers += `\r\n`;
+        }
         console.log("To sent: ")
         console.log(headers);
+        console.log(response.content)
         return Buffer.concat([
             Buffer.from(headers, "utf-8"),
             Buffer.isBuffer(response.content) ? response.content : Buffer.from(response.content, "utf-8")
