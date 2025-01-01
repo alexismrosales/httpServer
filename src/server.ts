@@ -36,74 +36,63 @@ export default class Server {
         });
     }
 
-    private handleClient(socket: net.Socket): void {
-        let contentLength: number = 0;
-        let headerLength: number = 0;
-        let buffer = "";
-        socket.on('data', async (data) => {
-            buffer += data.toString('utf-8');
-            if (contentLength === 0) {
-                console.log("New client connected");
-                this.httpUtils = new HTTPUtils(buffer);
-                contentLength = this.httpUtils.contentLength;
-                headerLength = this.httpUtils.header.length;
-            }
 
-            if (((buffer.length - headerLength) >= contentLength) && contentLength !== 0) {
-                try {
-                    if (this.httpUtils) {
-                        this.httpUtils.content = this.httpUtils.getContent(buffer);
-                        const response: Buffer = await this.managePetition();
+
+    private handleClient(socket: net.Socket): void {
+        let buffer = Buffer.alloc(0);
+        let contentLength = 0;
+        let headerLength = 0;
+
+        socket.on('data', async (data) => {
+            buffer = Buffer.concat([buffer, data]);
+            while (true) {
+                if (contentLength === 0) {
+                    const headerEndIndex = buffer.indexOf("\r\n\r\n");
+                    if (headerEndIndex !== -1) {
+                        const header = buffer.slice(0, headerEndIndex + 4).toString('utf-8');
+                        this.httpUtils = new HTTPUtils(header);
+                        contentLength = this.httpUtils.contentLength;
+                        headerLength = headerEndIndex + 4;
+                    } else {
+                        break;
+                    }
+                }
+
+                if (buffer.length >= headerLength + contentLength) {
+                    const body = buffer.slice(headerLength, headerLength + contentLength);
+                    if (this.httpUtils)
+                        this.httpUtils.content = body.toString('utf-8');
+                    try {
+                        const response = await this.managePetition();
                         socket.write(response);
 
-                        buffer = "";
-                        contentLength = 0;
-                        headerLength = 0;
-
-                        // if (this.httpUtils.headers["Connection"] !== "keep-alive") {
+                        if (this.httpUtils)
+                            if (this.httpUtils.headers["Connection"] !== "keep-alive") {
+                                socket.end();
+                                return;
+                            }
+                    } catch (err) {
+                        console.error("Error handling request:", err);
+                        socket.write(this.createResponse(500, "text/html", "<h1>500 INTERNAL SERVER ERROR</h1>"));
                         socket.end();
-                        // }
+                        return;
                     }
-                } catch (err) {
-                    console.error("Error handling request:", err);
-                    socket.write(this.createResponse(500, "text/html", "<h1>500 INTERNAL SERVER ERROR</h1>"));
-                    socket.end();
-                }
-            }
-            if (contentLength == 0) {
-                const response: Buffer = await this.managePetition();
-                socket.write(response);
-                if (this.httpUtils) {
-                    //  if (this.httpUtils.headers["Connection"] != "keep-alive") {
-                    socket.end()
-                    //  } else {
-                    //      console.log("Connection in mode keep-alive");
-                    //      resetTimeout();
-                    //  }
+
+                    buffer = buffer.slice(headerLength + contentLength);
+                    contentLength = 0;
+                    headerLength = 0;
+                } else {
+                    break;
                 }
             }
         });
-        let inactivityTimeout: NodeJS.Timeout | null = null;
-        const resetTimeout = () => {
-            if (inactivityTimeout) {
-                clearTimeout(inactivityTimeout);
-            }
-            inactivityTimeout = setTimeout(() => {
-                console.log("Close socket for inactivty");
-                socket.end();
-            }, 3000);
-        };
 
         socket.on('close', () => {
-            if (inactivityTimeout) {
-                clearTimeout(inactivityTimeout);
-                inactivityTimeout = null;
-            }
             console.log("Connection close");
         });
 
         socket.on('end', () => {
-            console.log('Client disconnected!');
+            console.log("Client disconnected!");
         });
 
         socket.on('error', (err) => {
@@ -111,16 +100,17 @@ export default class Server {
         });
     }
 
+
+
     private async managePetition(): Promise<Buffer> {
         const method = this.httpUtils?.headers["Method"];
         const path = this.httpUtils?.headers["Path"];
-        console.log(`Request:\n${this.httpUtils?.header}`);
         switch (method) {
             case 'GET':
                 try {
                     return await this.handleGet(path);
                 } catch (err) {
-                    console.error("Error handling request:", err);
+                    console.error("Error handling GET request:", err);
                     return this.createResponse(500, "text/html", "<h1>500 INTERNAL SERVER ERROR</h1>");
                 }
             case 'PUT':
@@ -128,13 +118,29 @@ export default class Server {
                     if (this.httpUtils) {
                         return await this.handlePut(this.httpUtils.content);
                     } else {
-                        console.error("Error with handler");
+                        console.error("Error with PUT handler");
                     }
                 }
                 catch (err) {
-                    console.error("Error handling request: ", err)
+                    console.error("Error handling PUT request: ", err)
+                }
+            case 'POST':
+                try {
+                    if (this.httpUtils) {
+                        return await this.handlePost(this.httpUtils.content);
+                    } else {
+                        console.error("Error with handler POST handler");
+                    }
+                }
+                catch (err) {
+                    console.error("Error handling POST request: ", err)
                 }
             case 'DELETE':
+                try {
+                    return this.handleDelete(path);
+                } catch (err) {
+
+                }
             default:
                 return this.createResponse(405, "text/html", "<h1>405 METHOD NOT ALLOWED</h1>");
         }
@@ -146,6 +152,7 @@ export default class Server {
         switch (path) {
             case '/':
             case 'index.html':
+                console.log("xd")
                 try {
                     const file = await this.fileManager.getFile("index.html");
                     if (file) {
@@ -173,7 +180,6 @@ export default class Server {
                     const ext = this.httpUtils?.headers["Extension"];
                     if (file) {
                         if (ext == "css" || ext == "html" || ext == "txt") {
-                            console.log(ext)
                             return this.createResponse(200, `text/${ext}`, file);
                         } else {
                             return this.createResponse(200, `application/${ext == "js" ? "javascript" : ext}`, file);
@@ -205,6 +211,30 @@ export default class Server {
         }
     }
 
+    private async handlePost(data: string) {
+        const content = "<h1>202 DATA ACCEPTED</h1>"
+        console.log(`New data received:\n ${data}`);
+        return this.createResponse(202, "text/html", content);
+    }
+
+    private async handleDelete(path: string) {
+        const content = "<h1>202 FILE DELETED SUCCESSFULLY</h1>";
+        console.log("Client ask for:", path);
+        switch (path) {
+            case '/':
+            case 'index.html':
+            case 'jsfile.js':
+                return this.createResponse(403, "text/html", `<h1>FILE ${path} NOT ALLOWED TO DELETE</h1>`)
+            default:
+                try {
+                    await this.fileManager.deleteFile(path);
+                } catch (err) {
+                    console.error(`Error deleting file: ${err}`);
+                }
+                return this.createResponse(202, "text/html", content);
+        }
+    }
+
     private createResponse(code: number, contentType: string, content: Buffer | string): Buffer {
         const contentBuffer = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf-8");
         const res: Response = {
@@ -225,6 +255,7 @@ export default class Server {
             200: 'OK',
             201: 'Created',
             202: 'Accepted',
+            403: 'Forbidden',
             404: 'Not Found',
             405: 'Method Not Allowed',
             415: 'Unsupported Media Type',
@@ -243,7 +274,6 @@ export default class Server {
         }
         console.log("To sent: ")
         console.log(headers);
-        console.log(response.content)
         return Buffer.concat([
             Buffer.from(headers, "utf-8"),
             Buffer.isBuffer(response.content) ? response.content : Buffer.from(response.content, "utf-8")
